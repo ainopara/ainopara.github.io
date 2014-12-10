@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html>
+	<head>
+		<meta charset="utf-8" />
+		<link rel="stylesheet" type="text/css" href="css/style.css" />
+		<title>wndr4300实现Webdav服务器</title>
+	</head>
+<body>
+
+<h1>wndr4300实现Webdav服务器</h1>
+
+<h2>环境与目标</h2>
+
+<p>路由器硬件：Netgear wndr4300</p>
+
+<p>路由器系统：OpenWrt Barrier Breaker 14.07正式版</p>
+
+<p>Omnifocus的Mac版从2.0开始不再支持Bonjour同步，迫使我不得不自己在Mac上搭建了一个Webdav服务器。</p>
+
+<p>具体搭建方法这里不详述了，因为我发现这个服务器非常不稳定，经常连不上，导致体验比较差。尝试从路由器ping我的Macbook，发现延迟很高，相当不稳定。于是决定将Webdav服务器搬到我的openwrt路由器上去。</p>
+
+<p>好在openwrt上要支持Webdav也很方便，首先，openwrt自带的uhttpd是不支持Webdav的，因而必须要用支持Wevdav的lighttpd替换它。这个uhttpd原本的任务是做luci配置页面的后台，因而lighttpd需要接管这个任务。</p>
+
+<h2>安装lighttpd</h2>
+
+<p>首先，通过如下命令安装lighttpd及相关module。</p>
+
+<pre><code>opkg update
+opkg install lighttpd
+opkg install lighttpd-mod-webdav
+opkg install lighttpd-mod-auth
+opkg install lighttpd-mod-cgi
+</code></pre>
+
+<p>cgi用于替代uhttpd做管理页面的后台。</p>
+
+<p>auth用于Webdav的验证，但并不是必须的。</p>
+
+<h2>配置lighttpd</h2>
+
+<p>随后对lighttpd的配置文件<code>/etc/lighttpd/lighttpd.conf</code>进行修改</p>
+
+<p>首先启用mod：</p>
+
+<pre><code>server.modules = (
+# &quot;mod_rewrite&quot;,
+# &quot;mod_redirect&quot;,
+# &quot;mod_alias&quot;,
+
+# &quot;mod_status&quot;,
+# &quot;mod_setenv&quot;,
+# &quot;mod_fastcgi&quot;,
+# &quot;mod_proxy&quot;,
+# &quot;mod_simple_vhost&quot;,
+  &quot;mod_cgi&quot;,
+# &quot;mod_ssi&quot;,
+# &quot;mod_usertrack&quot;,
+# &quot;mod_expire&quot;,
+  &quot;mod_webdav&quot;,
+  &quot;mod_auth&quot;
+)
+</code></pre>
+
+<p>注意Webdav在auth前，之所以这样配置主要是<a href="http://redmine.lighttpd.net/projects/lighttpd/wiki/Docs_ModWebDAV">lighttpd的文档</a>强调了这个事。我并没有亲自尝试过不这么安排顺序会怎样。</p>
+
+<p>向下找到cgi的配置项，将其改为</p>
+
+<pre><code>cgi.assign = ( &quot;luci&quot; =&gt; &quot;/usr/bin/lua&quot;)
+</code></pre>
+
+<p>最后找到Webdav的配置项，改为</p>
+
+<pre><code>$HTTP[&quot;url&quot;] =~ &quot;^/omnifocus($|/)&quot; {
+ webdav.activate = &quot;enable&quot;
+# webdav.is-readonly = &quot;enable&quot;
+ webdav.sqlite-db-name = &quot;/var/run/lighttpd-webdav-lock.db&quot;
+}
+</code></pre>
+
+<p>注意这里is-readonly我并没有启用，因为要作为omnifocus的同步服务器是需要将文件像服务器写入的。这块配置第一行的意思是当访问url中omnifocus子目录时进行大括号内的配置，既启用Webdav并配置数据库。</p>
+
+<p>这个配置是无加密验证的配置，考虑到这个路由器只在自己家庭内使用，暂且配置到这种程度是够用的。</p>
+
+<h2>启用lighttpd</h2>
+
+<p>接下来保存配置，并到<code>/www</code>中建一个目录</p>
+
+<pre><code>cd /www
+mkdir omnifocus
+</code></pre>
+
+<p>未来同步的数据就存储在这个目录中。</p>
+
+<p>禁用uhttpd并启用lighttpd</p>
+
+<pre><code>/etc/init.d/uhttpd stop
+/etc/init.d/uhttpd disable
+/etc/init.d/lighttpd enable
+/etc/init.d/lighttpd start
+</code></pre>
+
+<p>这之后试着访问路由器ip地址，应该能和之前一样访问路由器后台页面了。同时也可以通过forklift一类的工具尝试一下server地址设置为路由器ip（默认是<code>192.168.1.1</code>），remote path 设置为<code>/omnifocus</code>，不出以外即可连接上路由器的Webdav服务器了。</p>
+
+<p>此时将omnifocus的Webdav服务器地址设置为</p>
+
+<pre><code>http://192.168.1.1/omnifocus
+</code></pre>
+
+<p>即可完成同步了。</p>
+
+<h2>为路由器设置一个域名</h2>
+
+<p>我觉得<code>192.168.1.1</code>这个地址太通用了，当我的设备在其他网络中时，可能会将那个网络的路由器当作Webdav同步服务器，进而尝试进行同步。为了避免这种情况，我想将路由器绑定一个域名，比如<code>openwrt.lan</code>，这个域名在路由器局域网外无意义，因而设备不会得到对应的ip地址，进而不会尝试同步，而在内网中指向路由器ip，使得同步功能能在内网正常工作。</p>
+
+<p>方法非常简单，在路由器的hosts文件（<code>/etc/hosts</code>）中加一行：</p>
+
+<pre><code>192.168.1.1 openwrt.lan
+</code></pre>
+
+<p>保存后重启dnsmasq服务生效</p>
+
+<pre><code>/etc/init.d/dnsmasq restart
+</code></pre>
+
+<p>注意如果你的设备开启了VPN或自己指定了DNS服务器，则不会向路由器请求域名解析，这种情况需要另外想办法。</p>
+
+<p>如果一切顺利，你可以将omnifocus的Webdav服务器的地址改成</p>
+
+<pre><code>http://openwrt.lan/omnifocus
+</code></pre>
+
+<h2>好像少了点什么</h2>
+
+<p>auth部分待续，因为现在同步体验非常棒，搞得我都懒得弄这个了。</p>
+
+</body>
+</html>
