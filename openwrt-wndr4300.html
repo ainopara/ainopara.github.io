@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html>
+	<head>
+		<meta charset="utf-8" />
+		<link rel="stylesheet" type="text/css" href="css/style.css" />
+		<title>WNDR4300刷OpenWrt记录</title>
+	</head>
+<body>
+
+<h1>WNDR4300刷OpenWrt记录</h1>
+
+<p>双11的时候，以299的价格入了一个NETGEAR WNDR4300。</p>
+
+<p>购置这个路由器的主要动力是自己的电脑目前作为smb服务器为iPad提供漫画/视频数据，150Mbps传输速度的一代极路由不能满足这种大文件的速度要求了。次要动力是双11打折。</p>
+
+<h2>NETGEAR原厂固件</h2>
+
+<p>家里有一个路由器在墙另一边，而我的屋子里没有网线口，考虑到5G穿过一堵墙后的信号衰减，准备把WNDR4300放到自己的屋子里做无线中继。结果原厂固件提供的无限中继功能设置好重启后路由器就砖了<sup><a id="ffn1" href="#fn1" class="footnote">1</a></sup>。折腾了好久，问了厂家客服，人家都答应可以给换新了。后来自己试出解决办法来了，在电源灯刚亮起来还是黄色的时候就按住reset，不要等到电源灯变绿以后再按，这样按住一段时间后会自动重启，这个操作是原厂固件提供的恢复出厂设置功能。</p>
+
+<h2>刷OpenWrt固件</h2>
+
+<p>最初是想用原厂固件的，但是原厂固件没办法实现我的需求。遂刷了<a href="http://www.v2ex.com/t/128585">mind3x编译的OpenWrt固件</a>，刷固件方法非常简单，直接进入原厂后台页面 <code>www.routerlogin.net</code> 找到升级固件的页面，选择百度盘里的<code>openwrt-ar71xx-nand-wndr4300-ubi-factory.img</code>选上上传到路由器，相当爽快地3分钟内搞定全过程，网线连上浏览器登录<code>192.168.1.1</code>，就正式进入了openwrt提供的luci后台管理界面，第一次登录因为没有设置root密码，不需要输入密码直接点击login按钮即可登录。</p>
+
+<h2>无线设置</h2>
+
+<p>接下来要解决无线中继的问题，看到Network-&gt;Wifi里可以选择让2.4G的天线做client就萌生了一个想法：由于WNDR4300是一个双频路由器，直接让2.4G的天线作为上级路由信号的接收器，5G的天线作为这个路由信号的发送端，就可以实现类似中继的效果了。而OpenWrt还真提供了一个简单的配置方法，可以在Wifi选项的2.4G天线那里选择Scan，然后找到上级路由的信号，输入wifi密码，系统会自动设置这个天线作为上级路由的client。</p>
+
+<p>之后就是手动开启5G无线，并为其设置无线密码。注意如果你家里的设备比较新，这个wifi选项里可以选择40MHz频宽<sup><a id="ffn2" href="#fn2" class="footnote">2</a></sup>，强制使用<sup><a id="ffn3" href="#fn3" class="footnote">3</a></sup>可选可不选。无论选不选，对支持802.11n的5G的新设备都可以实现以450Mbps的满速通信<sup><a id="ffn4" href="#fn4" class="footnote">4</a></sup>。</p>
+
+<h2>第一次尝试实现time machine</h2>
+
+<p>这个时候这个路由器已经满足了我最初的需求了，我又使用rmbp平时都用移动硬盘做备份，就想把移动硬盘接到这个路由器上，让这个路由器实现time capsult的功能，既time machine无线备份。于是开始按照<a href="http://wiki.openwrt.org/timemachine">这个wiki</a>的指导操作。不过在opkg update之前记得把<code>/etc/opkg.conf</code>中所有地址的主干都改成<code>http://downloads.openwrt.org/barrier_breaker/14.07/ar71xx/nand/packages/</code></p>
+
+<p>前面的设置都没问题，后来发现由于提示内核版本不对应不能成功安装<code>kmod-fs-hfsplus</code>。我当时不知道还可以通过加入<code>-force-depends</code>标签来忽略这个问题，得知kmod系列的插件都是和固件匹配的，于是先是通过sysupgrade功能升级到mind3x提供的14.07正式版，然后又想通过sysupgrade刷成OpenWrt官方固件，砖了。</p>
+
+<h2>tftp救砖</h2>
+
+<p>这次砖主要体现在电源灯都不亮（刚启动的时候黄灯亮，启动好后反而不亮了），插网线倒是对应的网口灯亮，但是毫无响应。</p>
+
+<p>其他的灯当然也都不亮。当时不知道怎么处理，折腾了好久，又是插网线改ip，ping也ping不通，重启好几次。</p>
+
+<p>最终从各种论坛得知了，netgear的wndr4300有一个万能刷固件的方法，无论当前固件什么样，都可以刷成你想要固件。</p>
+
+<p>首先进入刷固件模式，即在关机的状态下按住reset键，然后保持reset键按下打开开关，电源灯会看到黄灯闪烁，按住reset键直到看到电源灯变成绿灯闪烁。这个状态下，wndr4300会将自身ip地址设置为<code>192.168.1.1</code>，并接受用户上传固件。</p>
+
+<p>通过网线连接路由器，并设置当前电脑使用固定地址<code>192.168.1.2</code>，子网掩码<code>255.255.255.0</code>，其他随便。然后使用tftp工具向<code>192.168.1.1</code>上传你想刷的固件。路由器会自动进行刷机并重启。</p>
+
+<p>我一开始是刷的netgear的原厂固件，结果发现原厂固件会不断重启，根本不能用<sup><a id="ffn5" href="#fn5" class="footnote">5</a></sup>。于是又尝试刷了<a href="http://downloads.openwrt.org/barrier_breaker/14.07/ar71xx/nand">http://downloads.openwrt.org/barrier_breaker/14.07/ar71xx/nand</a>中的<code>openwrt-ar71xx-nand-wndr4300-ubi-factory.img</code>这个OpenWrt官方固件，成功。</p>
+
+<h2>第二次尝试实现time machine</h2>
+
+<p>照常设置了wifi，然后开始着手第二次配置timemachine。这次很顺利的装上了kmod-fs-hfsplus，也成功地挂载了移动硬盘。</p>
+
+<p>可惜在下一步操作的时候发现官方源里没有netatalk这个包，而它是实现timemachine功能必要的软件包。于是第二次尝试实现time machine也失败了。另外就是这个官方原版固件在配置上有问题，并不能利用wndr4300全部的闪存空间，刷完固件显示只有10几M的空间。而前面mind3x提供的固件会显示剩余90M空间，看来官方的固件还是需要完善啊。</p>
+
+<p>如果要实现time machine，我现在有三个选择：</p>
+
+<p>1.刷回<a href="http://downloads.openwrt.org/attitude_adjustment/12.09/ar71xx/nand/">OpenWrt AA版</a>，或者升级到<a href="https://downloads.openwrt.org/snapshots/trunk/">truck版</a>,两个版本官方源里都有netatalk。</p>
+
+<p>2.坐等BB版的官方源添加netatalk。</p>
+
+<p>3.自己为BB版的OpenWrt交叉编译一个netatalk。</p>
+
+<p>最终选择了坐等官方更新。毕竟花了两个晚上折腾路由器，中间还这么多波折<sup><a id="ffn6" href="#fn6" class="footnote">6</a></sup>，已经心力交瘁了。</p>
+
+<ol id="footnotes">
+	<li id="fn1">具体情况就是开机电源灯先黄，之后稳定变成绿色（说明启动完成），但这个状态下插上网线也不给分配IP，WIFI也没开，按钮全不好使（包括reset）。 <a href="#ffn1">&#8617;</a></li>
+	<li id="fn2">Advanced Settings中的HT mode (802.11n)选项。 <a href="#ffn2">&#8617;</a></li>
+	<li id="fn3">Force 40MHz mode <a href="#ffn3">&#8617;</a></li>
+	<li id="fn4">实测与原厂固件有较大提高，但也没达到450Mbps这么高的速度。 <a href="#ffn4">&#8617;</a></li>
+	<li id="fn5">据官方wiki所述，原厂固件不断重启与新刷的openwrt正式版bb固件无5G wifi是同一个原因导致的，并提供了解决这个问题的方法。官方wiki说，如果你发现找不到5G wifi，重启路由器即可自动解决。 <a href="#ffn5">&#8617;</a></li>
+	<li id="fn6">我当时不知道固件刷砖了可以救，还以为这个路由器彻底变成电子垃圾了。 <a href="#ffn6">&#8617;</a></li>
+</ol></body>
+</html>
